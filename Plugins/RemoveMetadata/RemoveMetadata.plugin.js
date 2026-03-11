@@ -152,11 +152,6 @@ module.exports = class RemoveMetadata {
             container.appendChild(row);
         });
 
-        const info = document.createElement("div");
-        info.style.cssText = "color: var(--text-muted); font-size: 12px; margin-top: 15px;";
-        info.textContent = "✓ Personal metadata removal is always enabled";
-        container.appendChild(info);
-
         return container;
     }
 };
@@ -165,7 +160,7 @@ class SettingsManager {
     constructor(name) {
         this.name = name;
         this.defaultSettings = {
-            randomizeFileName: false
+            randomizeFileName: true
         };
         this.current = Object.assign(structuredClone(this.defaultSettings), BdApi.Data.load(name, "settings") || {});
     }
