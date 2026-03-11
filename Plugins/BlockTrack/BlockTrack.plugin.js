@@ -11,11 +11,9 @@ module.exports = class BlockTrack {
     constructor(meta) {
         this.meta = meta;
         this.settings = new SettingsManager(meta.name);
-        this.patcher = new NativePatcher();
     }
 
     start() {
-        BdApi.Logger.log(this.meta.name, "Plugin started");
         const cfg = this.settings.current;
 
         if (cfg.blockTracker?.science) this.patchScience();
@@ -25,18 +23,15 @@ module.exports = class BlockTrack {
         if (cfg.blockTracker?.typing) this.patchTyping();
         if (cfg.blockTracker?.readReceipts) this.patchReadReceipts();
         if (cfg.blockTracker?.activity) this.patchActivity();
-        if (cfg.blockTracker?.webSocket) this.patchWebSocket();
-        if (cfg.blockTracker?.process && cfg.blockTracker?.repatchProcess) this.startProcessMonitor();
-        if (cfg.webRTC?.blockLeaks) this.patchWebRTC();
+        if (cfg.blockTracker?.process) this.startProcessMonitor();
+        if (cfg.blockTracker?.beacon) this.patchBeaconApi();
     }
 
     stop() {
-        BdApi.Logger.log(this.meta.name, "Plugin stopped");
         if (this._processMonitorInterval) {
             clearInterval(this._processMonitorInterval);
             this._processMonitorInterval = null;
         }
-        this.patcher.restoreAll();
         BdApi.Patcher.unpatchAll(this.meta.name);
     }
 
@@ -54,12 +49,8 @@ module.exports = class BlockTrack {
                 { key: "typing", label: "Block Typing Indicator" },
                 { key: "readReceipts", label: "Block Read Receipts" },
                 { key: "activity", label: "Block Activity Status" },
-                { key: "webSocket", label: "Filter WebSocket Payloads" },
-                { key: "process", label: "Block Process Monitoring" },
-                { key: "repatchProcess", label: "Auto-repatch Process Monitor" }
-            ] },
-            { section: "webRTC", items: [
-                { key: "blockLeaks", label: "Block WebRTC IP Leaks" }
+                { key: "process", label: "Block Game Library & RPC" },
+                { key: "beacon", label: "Block Beacon API (Page Unload)" }
             ] }
         ];
 
@@ -69,7 +60,7 @@ module.exports = class BlockTrack {
 
             const title = document.createElement("div");
             title.style.cssText = "font-weight: 600; margin-bottom: 10px;";
-            title.textContent = section.section === "blockTracker" ? "Tracker Blocking" : "WebRTC Protection";
+            title.textContent = "Tracker Blocking";
             sectionDiv.appendChild(title);
 
             section.items.forEach(item => {
@@ -84,7 +75,6 @@ module.exports = class BlockTrack {
                 checkbox.addEventListener("change", () => {
                     settings[section.section][item.key] = checkbox.checked;
                     this.settings.save();
-                    BdApi.Logger.info(this.meta.name, `${item.label}: ${checkbox.checked}`);
                 });
 
                 row.appendChild(checkbox);
@@ -190,97 +180,58 @@ module.exports = class BlockTrack {
         }
     }
 
-    // WebSocket 메시지 필터링
-    patchWebSocket() {
-        const origWS = window.WebSocket;
-
-        const PatchedWebSocket = class extends origWS {
-            addEventListener(type, handler) {
-                if (type !== "message") return super.addEventListener(type, handler);
-
-                return super.addEventListener(type, (event) => {
-                    try {
-                        const msg = JSON.parse(event.data);
-                        if (msg.op === 0) {
-                            // READY: 추적 토큰 제거
-                            if (msg.t === "READY" && msg.d?.user) {
-                                delete msg.d.user.analytics_token;
-                                delete msg.d.user.fingerprint;
-                            }
-                            // PRESENCE_UPDATE: 활동 상태 제거
-                            if (msg.t === "PRESENCE_UPDATE" && msg.d?.activities) {
-                                msg.d.activities = [];
-                            }
-                        }
-                        event = new MessageEvent("message", { data: JSON.stringify(msg) });
-                    } catch (e) { }
-                    handler.call(this, event);
-                });
-            }
-
-            set onmessage(handler) {
-                if (!handler) return super.onmessage = null;
-                super.onmessage = (event) => {
-                    try {
-                        const msg = JSON.parse(event.data);
-                        if (msg.op === 0) {
-                            if (msg.t === "READY" && msg.d?.user) {
-                                delete msg.d.user.analytics_token;
-                                delete msg.d.user.fingerprint;
-                            }
-                            if (msg.t === "PRESENCE_UPDATE" && msg.d?.activities) {
-                                msg.d.activities = [];
-                            }
-                        }
-                        event = new MessageEvent("message", { data: JSON.stringify(msg) });
-                    } catch (e) { }
-                    handler.call(this, event);
-                };
-            }
-
-            get onmessage() {
-                return super.onmessage;
-            }
-        };
-
-        this.patcher.patchNative(window, "WebSocket", () => PatchedWebSocket);
-    }
-
-    // 프로세스 모니터 차단
+    // 게임 모니터 및 외부 플랫폼 감지 차단
     startProcessMonitor() {
-        const cfg = this.settings.current;
         const applyMonitorPatch = () => {
+            // Discord 유틸 모듈에서 게임 감지 차단
             const utils = BdApi.Webpack.getByKeys("getDiscordUtils");
-            if (!utils) return;
+            if (utils?.getDiscordUtils) {
+                const discord = utils.getDiscordUtils();
 
-            BdApi.Patcher.instead(this.meta.name, utils, "ensureModule", (_, [name], orig) => {
-                if (name?.includes("discord_rpc")) return;
-                return orig(name);
-            });
+                // 게임 라이브러리 접근 차단 - setObservedGamesCallback으로 빈 게임 목록 설정
+                if (discord?.setObservedGamesCallback) {
+                    discord.setObservedGamesCallback([], () => { });
+                    BdApi.Patcher.instead(this.meta.name, discord, "setObservedGamesCallback", () => { });
+                }
 
-            const discord = utils.getDiscordUtils?.();
-            if (discord?.setObservedGamesCallback) {
-                discord.setObservedGamesCallback([], () => { });
-                BdApi.Patcher.instead(this.meta.name, discord, "setObservedGamesCallback", () => { });
+                // RPC 정보 제거 - 게임 활동 상태 차단
+                if (discord?.sendActivityUpdate) {
+                    BdApi.Patcher.instead(this.meta.name, discord, "sendActivityUpdate", () => { });
+                }
+
+                // 외부 플랫폼(Steam, Epic Games 등) 감지 차단
+                if (discord?.ensureModule) {
+                    BdApi.Patcher.instead(this.meta.name, discord, "ensureModule", (_, [name], orig) => {
+                        if (name?.includes("discord_rpc") || name?.includes("game")) return;
+                        return orig(name);
+                    });
+                }
+            }
+
+            // RPC 관련 모듈 직접 차단
+            const rpc = BdApi.Webpack.getModule(m => m?.sendActivityUpdate || m?.setActivity);
+            if (rpc?.setActivity) {
+                BdApi.Patcher.instead(this.meta.name, rpc, "setActivity", () => { });
+            }
+            if (rpc?.sendActivityUpdate) {
+                BdApi.Patcher.instead(this.meta.name, rpc, "sendActivityUpdate", () => { });
             }
         };
 
         applyMonitorPatch();
 
-        if (cfg.blockTracker?.repatchProcess) {
-            this._processMonitorInterval = setInterval(applyMonitorPatch, 5000);
+        // 주기적으로 재패칭 (기능이 재로드될 수 있으므로)
+        if (!this._processMonitorInterval) {
+            this._processMonitorInterval = setInterval(applyMonitorPatch, 10000);
         }
     }
 
-    // WebRTC IP 유출 방지
-    patchWebRTC() {
-        const origRTC = window.RTCPeerConnection;
-        const PatchedRTC = class extends origRTC {
-            constructor(config) {
-                super({ ...config, iceServers: [] });
-            }
-        };
-        this.patcher.patchNative(window, "RTCPeerConnection", () => PatchedRTC);
+    // Beacon API 차단 (페이지 언로드 시 데이터 전송 방지)
+    patchBeaconApi() {
+        const tracker = BdApi.Webpack.getModule(m => m?.sendBeacon);
+        if (tracker?.sendBeacon) {
+            BdApi.Patcher.instead(this.meta.name, tracker, "sendBeacon", () => true);
+        }
     }
 };
 
@@ -297,12 +248,8 @@ class SettingsManager {
                 typing: false,
                 readReceipts: false,
                 activity: false,
-                webSocket: false,
-                process: false,
-                repatchProcess: true
-            },
-            webRTC: {
-                blockLeaks: true
+                process: true,
+                beacon: true
             }
         };
         this.current = this._merge(structuredClone(this.defaultSettings), BdApi.Data.load(name, "settings") || {});
@@ -321,49 +268,5 @@ class SettingsManager {
 
     save() {
         BdApi.Data.save(this.name, "settings", this.current);
-    }
-}
-
-// 네이티브 패칭 관리
-class NativePatcher {
-    constructor() {
-        this.restorers = [];
-    }
-
-    patchNative(obj, prop, factory) {
-        if (!obj || !obj[prop]) return;
-        const orig = obj[prop];
-        const patched = factory(orig);
-
-        try {
-            Object.defineProperty(patched, "toString", { get: () => orig.toString.bind(orig) });
-        } catch (e) { }
-
-        try {
-            obj[prop] = patched;
-        } catch (e) {
-            try {
-                Object.defineProperty(obj, prop, { value: patched, configurable: true, writable: true });
-            } catch (e2) {
-                return;
-            }
-        }
-
-        this.restorers.push(() => {
-            try {
-                obj[prop] = orig;
-            } catch (e) {
-                try {
-                    Object.defineProperty(obj, prop, { value: orig, configurable: true, writable: true });
-                } catch (e2) { }
-            }
-        });
-    }
-
-    restoreAll() {
-        this.restorers.forEach(restore => {
-            try { restore(); } catch (e) { }
-        });
-        this.restorers = [];
     }
 }
