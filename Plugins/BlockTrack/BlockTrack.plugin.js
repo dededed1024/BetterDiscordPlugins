@@ -1,7 +1,7 @@
 /**
  * @name BlockTrack
  * @author dededed6
- * @version 1.0.1
+ * @version 1.0.2
  * @description Block Discord tracking and analytics events
  * @website https://github.com/dededed6/BetterDiscordPlugins
  * @source https://raw.githubusercontent.com/dededed6/BetterDiscordPlugins/master/Plugins/BlockTrack/BlockTrack.plugin.js
@@ -11,9 +11,24 @@ module.exports = class BlockTrack {
     constructor(meta) {
         this.meta = meta;
         this.settings = new SettingsManager(meta.name);
+        this.intervalManager = new IntervalManager();
+        this.intervalManager.register(new IntervalTask("repatchAll", () => this.applyAllPatches()));
     }
 
     start() {
+        this.applyAllPatches();
+
+        const interval = this.settings.current.blockTracker.repatchInterval || 10000;
+        this.intervalManager.updateInterval(interval);
+        this.intervalManager.start();
+    }
+
+    stop() {
+        this.intervalManager.stop();
+        BdApi.Patcher.unpatchAll(this.meta.name);
+    }
+
+    applyAllPatches() {
         const cfg = this.settings.current;
 
         if (cfg.blockTracker?.science) this.patchScience();
@@ -23,16 +38,8 @@ module.exports = class BlockTrack {
         if (cfg.blockTracker?.typing) this.patchTyping();
         if (cfg.blockTracker?.readReceipts) this.patchReadReceipts();
         if (cfg.blockTracker?.activity) this.patchActivity();
-        if (cfg.blockTracker?.process) this.startProcessMonitor();
+        if (cfg.blockTracker?.process) this.patchProcessMonitor();
         if (cfg.blockTracker?.beacon) this.patchBeaconApi();
-    }
-
-    stop() {
-        if (this._processMonitorInterval) {
-            clearInterval(this._processMonitorInterval);
-            this._processMonitorInterval = null;
-        }
-        BdApi.Patcher.unpatchAll(this.meta.name);
     }
 
     getSettingsPanel() {
@@ -96,8 +103,10 @@ module.exports = class BlockTrack {
 
         input.addEventListener("input", () => {
             valueDisplay.textContent = input.value + "s";
-            settings.blockTracker.repatchInterval = parseInt(input.value) * 1000;
+            const newInterval = parseInt(input.value) * 1000;
+            settings.blockTracker.repatchInterval = newInterval;
             this.settings.save();
+            this.intervalManager.updateInterval(newInterval);
         });
 
         inputContainer.appendChild(input);
@@ -201,49 +210,39 @@ module.exports = class BlockTrack {
     }
 
     // 게임 모니터 및 외부 플랫폼 감지 차단
-    startProcessMonitor() {
-        const applyMonitorPatch = () => {
-            // Discord 유틸 모듈에서 게임 감지 차단
-            const utils = BdApi.Webpack.getByKeys("getDiscordUtils");
-            if (utils?.getDiscordUtils) {
-                const discord = utils.getDiscordUtils();
+    patchProcessMonitor() {
+        // Discord 유틸 모듈에서 게임 감지 차단
+        const utils = BdApi.Webpack.getByKeys("getDiscordUtils");
+        if (utils?.getDiscordUtils) {
+            const discord = utils.getDiscordUtils();
 
-                // 게임 라이브러리 접근 차단 - setObservedGamesCallback으로 빈 게임 목록 설정
-                if (discord?.setObservedGamesCallback) {
-                    discord.setObservedGamesCallback([], () => { });
-                    BdApi.Patcher.instead(this.meta.name, discord, "setObservedGamesCallback", () => { });
-                }
-
-                // RPC 정보 제거 - 게임 활동 상태 차단
-                if (discord?.sendActivityUpdate) {
-                    BdApi.Patcher.instead(this.meta.name, discord, "sendActivityUpdate", () => { });
-                }
-
-                // 외부 플랫폼(Steam, Epic Games 등) 감지 차단
-                if (discord?.ensureModule) {
-                    BdApi.Patcher.instead(this.meta.name, discord, "ensureModule", (_, [name], orig) => {
-                        if (name?.includes("discord_rpc") || name?.includes("game")) return;
-                        return orig(name);
-                    });
-                }
+            // 게임 라이브러리 접근 차단 - setObservedGamesCallback으로 빈 게임 목록 설정
+            if (discord?.setObservedGamesCallback) {
+                discord.setObservedGamesCallback([], () => { });
+                BdApi.Patcher.instead(this.meta.name, discord, "setObservedGamesCallback", () => { });
             }
 
-            // RPC 관련 모듈 직접 차단
-            const rpc = BdApi.Webpack.getModule(m => m?.sendActivityUpdate || m?.setActivity);
-            if (rpc?.setActivity) {
-                BdApi.Patcher.instead(this.meta.name, rpc, "setActivity", () => { });
+            // RPC 정보 제거 - 게임 활동 상태 차단
+            if (discord?.sendActivityUpdate) {
+                BdApi.Patcher.instead(this.meta.name, discord, "sendActivityUpdate", () => { });
             }
-            if (rpc?.sendActivityUpdate) {
-                BdApi.Patcher.instead(this.meta.name, rpc, "sendActivityUpdate", () => { });
+
+            // 외부 플랫폼(Steam, Epic Games 등) 감지 차단
+            if (discord?.ensureModule) {
+                BdApi.Patcher.instead(this.meta.name, discord, "ensureModule", (_, [name], orig) => {
+                    if (name?.includes("discord_rpc") || name?.includes("game")) return;
+                    return orig(name);
+                });
             }
-        };
+        }
 
-        applyMonitorPatch();
-
-        // 주기적으로 재패칭 (설정한 간격으로)
-        if (!this._processMonitorInterval) {
-            const interval = this.settings.current.blockTracker.repatchInterval || 10000;
-            this._processMonitorInterval = setInterval(applyMonitorPatch, interval);
+        // RPC 관련 모듈 직접 차단
+        const rpc = BdApi.Webpack.getModule(m => m?.sendActivityUpdate || m?.setActivity);
+        if (rpc?.setActivity) {
+            BdApi.Patcher.instead(this.meta.name, rpc, "setActivity", () => { });
+        }
+        if (rpc?.sendActivityUpdate) {
+            BdApi.Patcher.instead(this.meta.name, rpc, "sendActivityUpdate", () => { });
         }
     }
 
@@ -290,5 +289,50 @@ class SettingsManager {
 
     save() {
         BdApi.Data.save(this.name, "settings", this.current);
+    }
+}
+
+// Interval Task
+class IntervalTask {
+    constructor(name, fn) {
+        this.name = name;
+        this.fn = fn;
+    }
+}
+
+// Interval Manager
+class IntervalManager {
+    constructor(intervalMs = 10000) {
+        this.intervalMs = intervalMs;
+        this.tasks = new Map();
+        this._interval = null;
+    }
+
+    register(task) {
+        this.tasks.set(task.name, task);
+    }
+
+    unregister(name) {
+        this.tasks.delete(name);
+    }
+
+    start() {
+        if (this._interval) return;
+        this._interval = setInterval(() => {
+            this.tasks.forEach(task => task.fn());
+        }, this.intervalMs);
+    }
+
+    stop() {
+        if (this._interval) {
+            clearInterval(this._interval);
+            this._interval = null;
+        }
+    }
+
+    updateInterval(intervalMs) {
+        this.intervalMs = intervalMs;
+        this.stop();
+        this.start();
     }
 }
