@@ -1,6 +1,6 @@
 # MetadataRemover
 
-Remove metadata from files (images, audio, documents).
+Remove metadata before uploading to Discord. Supports JPEG, PNG, WebP, GIF, TIFF, MP3, FLAC, AAC, and PDF formats.
 
 ## Features
 
