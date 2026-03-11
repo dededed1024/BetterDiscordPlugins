@@ -23,8 +23,9 @@ module.exports = class CleanUrls {
             await this.loadRules();
             if (this.rules) {
                 this.enabled = true;
-                this.patchMessageSending();
-                this.patchLinkClicks();
+                if (cfg.cleanOutgoing) this.patchMessageSending();
+                if (cfg.cleanIncoming) this.patchIncomingMessages();
+                if (cfg.cleanLinks) this.patchLinkClicks();
             }
         }
     }
@@ -40,28 +41,40 @@ module.exports = class CleanUrls {
         container.style.cssText = "color: var(--text-normal); padding: 10px;";
 
         const cfg = this.settings.current;
+        const items = [
+            { key: "enabled", label: "Enable CleanURLs" },
+            { key: "cleanOutgoing", label: "Clean outgoing message URLs" },
+            { key: "cleanIncoming", label: "Clean incoming message URLs" },
+            { key: "cleanLinks", label: "Clean link clicks" }
+        ];
 
-        const toggleRow = document.createElement("label");
-        toggleRow.style.cssText = "display: flex; align-items: center; margin: 10px 0; cursor: pointer;";
+        items.forEach(item => {
+            const row = document.createElement("label");
+            row.style.cssText = "display: flex; align-items: center; margin: 10px 0; cursor: pointer;";
 
-        const checkbox = document.createElement("input");
-        checkbox.type = "checkbox";
-        checkbox.checked = cfg.enabled;
-        checkbox.style.cssText = "margin-right: 10px; cursor: pointer;";
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.checked = cfg[item.key];
+            checkbox.style.cssText = "margin-right: 10px; cursor: pointer; width: 18px; height: 18px;";
+            checkbox.disabled = item.key !== "enabled" && !cfg.enabled;
 
-        checkbox.addEventListener("change", () => {
-            cfg.enabled = checkbox.checked;
-            this.settings.save();
+            checkbox.addEventListener("change", () => {
+                cfg[item.key] = checkbox.checked;
+                this.settings.save();
+                // enabled 변경 시 다른 체크박스 활성화/비활성화
+                if (item.key === "enabled") {
+                    items.slice(1).forEach(i => {
+                        const cb = row.parentElement?.querySelector(`input[data-key="${i.key}"]`);
+                        if (cb) cb.disabled = !checkbox.checked;
+                    });
+                }
+            });
+
+            checkbox.setAttribute("data-key", item.key);
+            row.appendChild(checkbox);
+            row.appendChild(document.createTextNode(item.label));
+            container.appendChild(row);
         });
-
-        toggleRow.appendChild(checkbox);
-        toggleRow.appendChild(document.createTextNode("Remove tracking parameters using ClearURLs rules"));
-        container.appendChild(toggleRow);
-
-        const info = document.createElement("div");
-        info.style.cssText = "margin-top: 15px; padding: 10px; background: var(--background-secondary); border-radius: 4px; font-size: 12px;";
-        info.textContent = "Automatically removes tracking parameters from Google, Amazon, Facebook, and more. Rules update daily.";
-        container.appendChild(info);
 
         return container;
     }
@@ -183,6 +196,18 @@ module.exports = class CleanUrls {
         }
     }
 
+    // 받은 메시지 URL 정리
+    patchIncomingMessages() {
+        const msgModule = BdApi.Webpack.getModule(m => m?.createMessage);
+        if (msgModule?.createMessage) {
+            BdApi.Patcher.before(this.meta.name, msgModule, "createMessage", (_, [, msg]) => {
+                if (msg?.content && this.enabled) {
+                    msg.content = msg.content.replace(/https?:\/\/[^\s]+/g, url => this.cleanUrl(url));
+                }
+            });
+        }
+    }
+
     // 링크 클릭 시 URL 정리
     patchLinkClicks() {
         document.addEventListener("click", (e) => {
@@ -205,7 +230,12 @@ module.exports = class CleanUrls {
 class SettingsManager {
     constructor(name) {
         this.name = name;
-        this.defaultSettings = { enabled: true };
+        this.defaultSettings = {
+            enabled: true,
+            cleanOutgoing: true,
+            cleanIncoming: true,
+            cleanLinks: true
+        };
         this.current = Object.assign(structuredClone(this.defaultSettings), BdApi.Data.load(name, "settings") || {});
     }
 
