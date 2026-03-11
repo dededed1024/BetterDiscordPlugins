@@ -32,6 +32,10 @@ module.exports = class BlockTrack {
 
     stop() {
         BdApi.Logger.log(this.meta.name, "Plugin stopped");
+        if (this._processMonitorInterval) {
+            clearInterval(this._processMonitorInterval);
+            this._processMonitorInterval = null;
+        }
         this.patcher.restoreAll();
         BdApi.Patcher.unpatchAll(this.meta.name);
     }
@@ -65,7 +69,7 @@ module.exports = class BlockTrack {
 
             const title = document.createElement("div");
             title.style.cssText = "font-weight: 600; margin-bottom: 10px;";
-            title.textContent = section.section === "blockTracker" ? "트래커 차단" : "WebRTC 보호";
+            title.textContent = section.section === "blockTracker" ? "Tracker Blocking" : "WebRTC Protection";
             sectionDiv.appendChild(title);
 
             section.items.forEach(item => {
@@ -244,18 +248,27 @@ module.exports = class BlockTrack {
 
     // 프로세스 모니터 차단
     startProcessMonitor() {
-        const utils = BdApi.Webpack.getByKeys("getDiscordUtils");
-        if (!utils) return;
+        const cfg = this.settings.current;
+        const applyMonitorPatch = () => {
+            const utils = BdApi.Webpack.getByKeys("getDiscordUtils");
+            if (!utils) return;
 
-        BdApi.Patcher.instead(this.meta.name, utils, "ensureModule", (_, [name], orig) => {
-            if (name?.includes("discord_rpc")) return;
-            return orig(name);
-        });
+            BdApi.Patcher.instead(this.meta.name, utils, "ensureModule", (_, [name], orig) => {
+                if (name?.includes("discord_rpc")) return;
+                return orig(name);
+            });
 
-        const discord = utils.getDiscordUtils?.();
-        if (discord?.setObservedGamesCallback) {
-            discord.setObservedGamesCallback([], () => { });
-            BdApi.Patcher.instead(this.meta.name, discord, "setObservedGamesCallback", () => { });
+            const discord = utils.getDiscordUtils?.();
+            if (discord?.setObservedGamesCallback) {
+                discord.setObservedGamesCallback([], () => { });
+                BdApi.Patcher.instead(this.meta.name, discord, "setObservedGamesCallback", () => { });
+            }
+        };
+
+        applyMonitorPatch();
+
+        if (cfg.blockTracker?.repatchProcess) {
+            this._processMonitorInterval = setInterval(applyMonitorPatch, 5000);
         }
     }
 
