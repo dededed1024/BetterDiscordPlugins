@@ -1,8 +1,8 @@
 /**
  * @name MetadataRemover
  * @author dededed6
- * @version 1.1.0
- * @description Remove metadata from files and pasted images
+ * @version 1.2.0
+ * @description Remove personal metadata from files
  * @website https://github.com/dededed6/BetterDiscordPlugins
  * @source https://raw.githubusercontent.com/dededed6/BetterDiscordPlugins/master/Plugins/MetadataRemover/MetadataRemover.plugin.js
  */
@@ -14,32 +14,128 @@ module.exports = class MetadataRemover {
     }
 
     start() {
-        BdApi.Patcher.before(this.meta.name, BdApi.Webpack.getByKeys("_sendMessage"), "_sendMessage", this.handleFileUpload.bind(this));
+        // addFiles 함수 패치 (파일 첨부할 때 호출됨 - 메타데이터 삭제)
+        const addFileModule = BdApi.Webpack.getByKeys("addFile");
+        if (addFileModule?.addFiles) {
+            BdApi.Patcher.before(this.meta.name, addFileModule, "addFiles", async (thisArg, args) => {
+                console.log("[MetadataRemover] addFiles called");
+                await this.processAddFiles(args);
+            });
+            console.log("[MetadataRemover] Patched addFiles successfully");
+        } else {
+            console.error("[MetadataRemover] Failed to find addFiles function");
+        }
+
+        // _sendMessage 패치 (파일 이름 랜덤화)
+        const sendMsgModule = BdApi.Webpack.getByKeys("_sendMessage");
+        if (sendMsgModule) {
+            BdApi.Patcher.before(this.meta.name, sendMsgModule, "_sendMessage", (thisArg, args) => {
+                console.log("[MetadataRemover] _sendMessage called");
+                this.randomizeFileNames.call(this, thisArg, args);
+            });
+            console.log("[MetadataRemover] Patched _sendMessage successfully");
+        }
+
+        console.log("[MetadataRemover] Plugin started successfully");
     }
 
     stop() {
         BdApi.Patcher.unpatchAll(this.meta.name);
     }
 
-    async handleFileUpload(_, args) {
+    async processAddFiles(args) {
+        // args[0]?.files에서 File 배열을 찾기
+        let files = args[0]?.files;
+
+        if (!files || !Array.isArray(files)) {
+            return;
+        }
+
+        console.log(`[MetadataRemover] Removing metadata from ${files.length} files`);
+
+        for (let i = 0; i < files.length; i++) {
+            const file = files[i];
+
+            // 실제 파일 찾기 (files[i].file 또는 files[i] 자체)
+            let actualFile = null;
+            if (file?.file instanceof File) {
+                actualFile = file.file;
+            } else if (file instanceof File) {
+                actualFile = file;
+            } else {
+                continue;
+            }
+
+            // 메타데이터 제거
+            const strippedFile = await MetadataStripper.strip(actualFile);
+
+            if (strippedFile !== actualFile) {
+                if (file?.file) {
+                    file.file = strippedFile;
+                } else {
+                    files[i] = strippedFile;
+                }
+                console.log(`[MetadataRemover] Removed metadata from: ${strippedFile.name}`);
+            }
+        }
+    }
+
+    randomizeFileNames(_, args) {
         const cfg = this.settings.current;
+        if (!cfg.randomizeFileName) return;
+
         const attachments = args[2]?.attachmentsToUpload;
         if (!attachments?.length) return;
 
         for (let i = 0; i < attachments.length; i++) {
             const attachment = attachments[i];
-
-            // 원본 파일명 저장
             const originalFilename = attachment.filename || attachment.name || '';
             const originalExt = originalFilename.substring(originalFilename.lastIndexOf('.') + 1) || '';
+            const randomName = this.generateRandomName(originalExt);
+            attachment.filename = randomName;
+            console.log(`[MetadataRemover] Randomized filename: ${randomName}`);
+        }
+    }
 
-            // 메타데이터 제거
-            if (attachment.file) {
-                attachment.file = await MetadataStripper.strip(attachment.file);
+    async handleFileUpload(_, args) {
+        const cfg = this.settings.current;
+        const attachments = args[2]?.attachmentsToUpload;
+
+        if (!attachments?.length) return;
+
+        for (let i = 0; i < attachments.length; i++) {
+            const attachment = attachments[i];
+            const fileToProcess = attachment.item?.file;
+
+            console.log(`[MetadataRemover] Processing attachment ${i}:`, {
+                attachment: attachment,
+                fileToProcess: fileToProcess,
+                fileType: typeof fileToProcess,
+                fileName: fileToProcess?.name,
+                fileSize: fileToProcess?.size
+            });
+
+            if (fileToProcess && typeof fileToProcess.arrayBuffer === 'function') {
+                const strippedFile = await MetadataStripper.strip(fileToProcess);
+
+                console.log(`[MetadataRemover] Stripped file:`, {
+                    strippedFile: strippedFile,
+                    strippedFileName: strippedFile?.name,
+                    strippedFileSize: strippedFile?.size,
+                    isSameReference: strippedFile === fileToProcess
+                });
+
+                if (strippedFile !== fileToProcess && attachment.item?.file) {
+                    console.log(`[MetadataRemover] Before replacement - attachment.item.file:`, attachment.item.file);
+                    attachment.item.file = strippedFile;
+                    console.log(`[MetadataRemover] After replacement - attachment.item.file:`, attachment.item.file);
+                    console.log(`[MetadataRemover] Is same as strippedFile?`, attachment.item.file === strippedFile);
+                }
             }
 
-            // 이름 난독화 - filename 직접 수정
             if (cfg.randomizeFileName) {
+                const originalFilename = attachment.filename || attachment.name || '';
+                const originalExt = originalFilename.substring(originalFilename.lastIndexOf('.') + 1) || '';
                 const randomName = this.generateRandomName(originalExt);
                 attachment.filename = randomName;
             }
@@ -88,14 +184,13 @@ module.exports = class MetadataRemover {
 
         const info = document.createElement("div");
         info.style.cssText = "color: var(--text-muted); font-size: 12px; margin-top: 15px;";
-        info.textContent = "✓ Metadata removal is always enabled";
+        info.textContent = "✓ Personal metadata removal is always enabled";
         container.appendChild(info);
 
         return container;
     }
 };
 
-// 설정 관리
 class SettingsManager {
     constructor(name) {
         this.name = name;
@@ -110,7 +205,6 @@ class SettingsManager {
     }
 }
 
-// 메타데이터 제거
 class MetadataStripper {
     static HANDLERS = {
         'jpg': 'stripJpegExif', 'jpeg': 'stripJpegExif',
@@ -132,6 +226,7 @@ class MetadataStripper {
         return handler ? await this[handler](file) : file;
     }
 
+    // JPEG: 개인정보 제거 (EXIF 제거)
     static async stripJpegExif(file) {
         if (!file.type.startsWith('image/jpeg')) return file;
         const buffer = await file.arrayBuffer();
@@ -142,14 +237,15 @@ class MetadataStripper {
         offset += 2;
 
         const chunks = [];
-        let foundExif = false;
+        let foundMetadata = false;
 
         while (offset < view.byteLength) {
             const marker = view.getUint16(offset);
             const length = view.getUint16(offset + 2);
 
-            if (marker === 0xFFE1) {
-                foundExif = true;
+            // EXIF(0xFFE1), IPTC(0xFFED), XMP(0xFFE9), 주석(0xFFFE) 제거
+            if ([0xFFE1, 0xFFED, 0xFFE9, 0xFFFE].includes(marker)) {
+                foundMetadata = true;
                 offset += length + 2;
                 continue;
             }
@@ -163,11 +259,12 @@ class MetadataStripper {
             }
         }
 
-        if (!foundExif) return file;
+        if (!foundMetadata) return file;
         const strippedBuffer = new Blob([[new Uint8Array([0xFF, 0xD8])], ...chunks], { type: 'image/jpeg' });
         return new File([strippedBuffer], file.name, { type: 'image/jpeg' });
     }
 
+    // PNG: 개인정보 제거 (타임스탐프, 텍스트 메타데이터 제거)
     static async stripPngMetadata(file) {
         if (!file.type.startsWith('image/png')) return file;
         const buffer = await file.arrayBuffer();
@@ -179,9 +276,12 @@ class MetadataStripper {
             const length = new DataView(buffer, offset, 4).getUint32(0, false);
             const chunkType = String.fromCharCode(...view.slice(offset + 4, offset + 8));
 
-            if (['IHDR', 'PLTE', 'IDAT', 'IEND', 'tRNS', 'gAMA', 'cHRM', 'sRGB'].includes(chunkType)) {
+            // 필수 청크: IHDR, IDAT, IEND, 색상정보
+            // 제거 대상: tIME, tEXt, zTXt, iTXt (개인정보 포함)
+            if (['IHDR', 'IDAT', 'IEND', 'PLTE', 'tRNS', 'gAMA', 'cHRM', 'sRGB', 'iCCP'].includes(chunkType)) {
                 chunks.push(buffer.slice(offset, offset + length + 12));
             }
+            // tIME, tEXt, zTXt, iTXt 등 메타데이터는 건너뜀
             offset += length + 12;
         }
 
@@ -190,6 +290,7 @@ class MetadataStripper {
         return new File([strippedBuffer], file.name, { type: 'image/png' });
     }
 
+    // WebP: 개인정보 제거 (EXIF, XMP, ICCP 제거)
     static async stripWebpMetadata(file) {
         if (!file.type.startsWith('image/webp')) return file;
         const buffer = await file.arrayBuffer();
@@ -206,6 +307,7 @@ class MetadataStripper {
             const chunkSize = view[offset + 4] | (view[offset + 5] << 8) | (view[offset + 6] << 16) | (view[offset + 7] << 24);
             const chunkEnd = offset + 8 + chunkSize;
 
+            // EXIF, XMP, ICCP 메타데이터 제거
             if (!['EXIF', 'XMP ', 'ICCP'].includes(chunkId)) {
                 chunks.push(view.slice(offset, chunkEnd + (chunkSize % 2 ? 1 : 0)));
             }
@@ -222,6 +324,7 @@ class MetadataStripper {
         return new File([strippedBuffer], file.name, { type: 'image/webp' });
     }
 
+    // GIF: 개인정보 제거 (주석, 응용 확장 제거)
     static async stripGifMetadata(file) {
         if (!file.type.startsWith('image/gif')) return file;
         const buffer = await file.arrayBuffer();
@@ -231,102 +334,124 @@ class MetadataStripper {
 
         let offset = 6;
         const result = [view.slice(0, 6)];
+        let foundMetadata = false;
 
         while (offset < view.length) {
             const separator = view[offset];
 
             if (separator === 0x21) {
                 const label = view[offset + 1];
-                if ([0xFF, 0xFE, 0xF9].includes(label)) {
-                    offset += 2;
-                    while (offset < view.length && view[offset] !== 0) {
-                        offset += view[offset] + 1;
+                // 0xFF: Application Extension, 0xFE: Comment Extension, 0xF9: Graphic Control Extension
+                if (label === 0xFF || label === 0xFE) {
+                    // 메타데이터 블록 건너뜀
+                    foundMetadata = true;
+                    let blockSize = view[offset + 2];
+                    offset += 3 + blockSize;
+                    while (view[offset] !== 0x00) {
+                        blockSize = view[offset];
+                        offset += 1 + blockSize;
                     }
-                    offset++;
+                    offset += 1;
                     continue;
                 }
-            } else if (separator === 0x2C) {
-                const blockSize = 10 + (view[offset + 8] & 0x80 ? Math.pow(2, (view[offset + 8] & 0x07) + 1) * 3 : 0);
-                result.push(view.slice(offset, offset + blockSize));
-                offset += blockSize;
-            } else if (separator === 0x3B) {
-                result.push(new Uint8Array([0x3B]));
+            }
+
+            if (separator === 0x3B) {
+                result.push(view.slice(offset, offset + 1));
                 break;
             }
-            offset++;
+
+            let length = 1;
+            if (separator === 0x21 && view[offset + 1] === 0xF9) {
+                length = 8;
+            } else if (separator === 0x2C) {
+                length = 11;
+                while (offset + length < view.length && view[offset + length] !== 0x00) {
+                    length += view[offset + length] + 1;
+                }
+                length += 1;
+            } else if (separator === 0x21) {
+                length = 2;
+                while (offset + length < view.length && view[offset + length] !== 0x00) {
+                    length += view[offset + length] + 1;
+                }
+                length += 1;
+            }
+
+            result.push(view.slice(offset, offset + length));
+            offset += length;
         }
 
+        if (!foundMetadata) return file;
         const strippedBuffer = new Blob(result, { type: 'image/gif' });
         return new File([strippedBuffer], file.name, { type: 'image/gif' });
     }
 
+    // TIFF: 개인정보 제거 (EXIF 제거)
     static async stripTiffExif(file) {
-        const buffer = await file.arrayBuffer();
-        const view = new DataView(buffer);
-        const isLittleEndian = view.getUint16(0) === 0x4949;
-
-        if (!isLittleEndian && view.getUint16(0) !== 0x4D4D) return file;
-        const minimalTiff = buffer.slice(0, 8);
-        const strippedBuffer = new Blob([minimalTiff], { type: file.type });
-        return new File([strippedBuffer], file.name, { type: file.type });
+        // TIFF는 EXIF 데이터 구조가 복잡하므로 최소한의 필수 정보만 유지
+        // 실제 구현시 TIFF 파서 필요 - 현재는 파일 그대로 반환
+        return file;
     }
 
+    // PDF: 개인정보 제거 (메타데이터 사전, 생성/수정 날짜 등 제거)
     static async stripPdfMetadata(file) {
         if (!file.type.startsWith('application/pdf')) return file;
         const buffer = await file.arrayBuffer();
-        const patterns = [
-            { search: '/Producer' },
-            { search: '/Creator' },
-            { search: '/CreationDate' },
-            { search: '/ModDate' }
+        const view = new Uint8Array(buffer);
+        let content = new TextDecoder().decode(buffer);
+
+        // PDF 메타데이터 제거: /Creator, /Author, /CreationDate, /ModDate, /Producer, /Keywords, /Subject
+        const metadataPatterns = [
+            /\/Creator\s*\([^)]*\)/gi,
+            /\/Author\s*\([^)]*\)/gi,
+            /\/CreationDate\s*\([^)]*\)/gi,
+            /\/ModDate\s*\([^)]*\)/gi,
+            /\/Producer\s*\([^)]*\)/gi,
+            /\/Keywords\s*\([^)]*\)/gi,
+            /\/Subject\s*\([^)]*\)/gi,
+            /\/Title\s*\([^)]*\)/gi
         ];
 
         let modified = false;
-        const result = new Uint8Array(buffer);
-
-        patterns.forEach(pattern => {
-            const searchBytes = new TextEncoder().encode(pattern.search);
-            for (let i = 0; i < result.length - searchBytes.length; i++) {
-                let match = true;
-                for (let j = 0; j < searchBytes.length; j++) {
-                    if (result[i + j] !== searchBytes[j]) { match = false; break; }
-                }
-                if (match) {
-                    let end = i + searchBytes.length;
-                    while (end < result.length && result[end] !== 10 && result[end] !== 13) end++;
-                    for (let k = i; k < end; k++) result[k] = 0x20;
-                    modified = true;
-                    i = end;
-                }
+        metadataPatterns.forEach(pattern => {
+            if (pattern.test(content)) {
+                modified = true;
+                content = content.replace(pattern, '');
             }
         });
 
         if (!modified) return file;
-        const blob = new Blob([result], { type: 'application/pdf' });
-        return new File([blob], file.name, { type: 'application/pdf' });
+        const strippedBuffer = new Blob([content], { type: 'application/pdf' });
+        return new File([strippedBuffer], file.name, { type: 'application/pdf' });
     }
 
+    // MP3: 개인정보 제거 (ID3 태그 제거)
     static async stripMp3Metadata(file) {
         if (!file.type.startsWith('audio/mpeg')) return file;
         const buffer = await file.arrayBuffer();
         const view = new Uint8Array(buffer);
 
         let offset = 0;
+        // ID3v2 제거
         if (view[0] === 0x49 && view[1] === 0x44 && view[2] === 0x33) {
             const size = ((view[6] & 0x7f) << 21) | ((view[7] & 0x7f) << 14) | ((view[8] & 0x7f) << 7) | (view[9] & 0x7f);
             offset = size + 10;
         }
 
         let end = view.length;
+        // ID3v1 제거
         if (view[view.length - 128] === 0x54 && view[view.length - 127] === 0x41 && view[view.length - 126] === 0x47) {
             end -= 128;
         }
 
+        if (offset === 0 && end === view.length) return file;
         const strippedBuffer = buffer.slice(offset, end);
         const blob = new Blob([strippedBuffer], { type: 'audio/mpeg' });
         return new File([blob], file.name, { type: 'audio/mpeg' });
     }
 
+    // FLAC: 개인정보 제거 (VORBIS_COMMENT 메타데이터 블록 제거)
     static async stripFlacMetadata(file) {
         if (!file.type.startsWith('audio/flac')) return file;
         const buffer = await file.arrayBuffer();
@@ -335,24 +460,41 @@ class MetadataStripper {
         if (view[0] !== 0x66 || view[1] !== 0x4C || view[2] !== 0x61 || view[3] !== 0x43) return file;
 
         let offset = 4;
-        while (offset < view.length) {
-            const isLast = (view[offset] & 0x80) !== 0;
+        const blocks = [];
+        let isLast = false;
+
+        while (!isLast && offset < view.length) {
+            const header = view[offset];
+            isLast = (header & 0x80) !== 0;
+            const blockType = header & 0x7F;
             const blockSize = (view[offset + 1] << 16) | (view[offset + 2] << 8) | view[offset + 3];
-            offset += blockSize + 4;
-            if (isLast) break;
+
+            // STREAMINFO(0) 유지, VORBIS_COMMENT(4) 제거
+            if (blockType !== 4) {
+                blocks.push(view.slice(offset, offset + 4 + blockSize));
+            }
+
+            offset += 4 + blockSize;
+        }
+
+        // 남은 오디오 프레임 추가
+        if (offset < view.length) {
+            blocks.push(view.slice(offset));
         }
 
         const flacHeader = new Uint8Array([0x66, 0x4C, 0x61, 0x43]);
-        const strippedBuffer = new Blob([flacHeader, view.slice(offset)], { type: 'audio/flac' });
+        const strippedBuffer = new Blob([flacHeader, ...blocks], { type: 'audio/flac' });
         return new File([strippedBuffer], file.name, { type: 'audio/flac' });
     }
 
+    // AAC: 개인정보 제거 (ID3 태그 제거)
     static async stripAacMetadata(file) {
         if (!file.type.startsWith('audio/aac') && !file.type.startsWith('audio/mp4')) return file;
         const buffer = await file.arrayBuffer();
         const view = new Uint8Array(buffer);
 
         let offset = 0;
+        // ID3 제거
         if (view[0] === 0x49 && view[1] === 0x44 && view[2] === 0x33) {
             const size = ((view[6] & 0x7f) << 21) | ((view[7] & 0x7f) << 14) | ((view[8] & 0x7f) << 7) | (view[9] & 0x7f);
             offset = size + 10;
@@ -364,6 +506,7 @@ class MetadataStripper {
         return new File([blob], file.name, { type: file.type });
     }
 
+    // MOV/MP4: 개인정보 제거 (타임스탐프, 메타데이터 원자 제거)
     static async stripMovMetadata(file) {
         const buffer = await file.arrayBuffer();
         const view = new DataView(buffer);
@@ -384,6 +527,7 @@ class MetadataStripper {
             );
 
             const atomEnd = offset + size;
+            // 메타데이터 원자 제거: udta, meta, ilst, free
             const metadataAtoms = ['udta', 'meta', 'ilst', 'free'];
 
             if (!metadataAtoms.includes(type)) {
@@ -425,39 +569,38 @@ class MetadataStripper {
 
             const metadataAtoms = ['udta', 'meta', 'ilst'];
             if (!metadataAtoms.includes(atomType)) {
-                // 타임스탬프가 있는 원자들 (mvhd, tkhd, mdhd, elst 등)
-                if (['mvhd', 'tkhd', 'mdhd', 'elst', 'gmhd'].includes(atomType)) {
+                // 타임스탐프 원자: 타임스탐프 값을 0으로 설정
+                if (['mvhd', 'tkhd', 'mdhd', 'elst'].includes(atomType)) {
                     const atomData = new Uint8Array(buffer, atomOffset, atomSize);
                     const atomCopy = new Uint8Array(atomSize);
                     atomCopy.set(atomData);
                     const dv = new DataView(atomCopy.buffer, atomCopy.byteOffset);
 
-                    // version 확인 (offset 8)
                     const version = atomCopy[8];
 
                     if (version === 0) {
-                        // version 0: 32-bit 타임스탬프 (offset 12-19)
+                        // version 0: 32-bit 타임스탐프 (offset 12-19)
                         if (atomSize >= 20) {
                             dv.setUint32(12, 0, false);  // creation time
                             dv.setUint32(16, 0, false);  // modification time
                         }
                     } else if (version === 1) {
-                        // version 1: 64-bit 타임스탬프 (offset 12-27)
+                        // version 1: 64-bit 타임스탐프 (offset 12-27)
                         if (atomSize >= 28) {
-                            dv.setUint32(12, 0, false);  // creation time (high 32)
-                            dv.setUint32(16, 0, false);  // creation time (low 32)
-                            dv.setUint32(20, 0, false);  // modification time (high 32)
-                            dv.setUint32(24, 0, false);  // modification time (low 32)
+                            dv.setUint32(12, 0, false);
+                            dv.setUint32(16, 0, false);
+                            dv.setUint32(20, 0, false);
+                            dv.setUint32(24, 0, false);
                         }
                     }
 
                     atoms.push(atomCopy);
                 }
-                // 컨테이너 원자 (trak, mdia, minf, stbl 등) - 재귀 처리
+                // 컨테이너 원자: 재귀 처리
                 else if (['trak', 'mdia', 'minf', 'stbl', 'edts'].includes(atomType)) {
                     atoms.push(this.stripMovAtom(buffer, atomOffset, atomSize));
                 }
-                // 나머지 원자
+                // 기타 원자: 그대로 유지
                 else {
                     atoms.push(uint8view.slice(atomOffset, atomOffset + atomSize));
                 }
