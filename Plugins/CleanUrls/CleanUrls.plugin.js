@@ -1,7 +1,7 @@
 /**
  * @name CleanUrls
  * @author dededed6
- * @version 1.1.1
+ * @version 1.2.0
  * @description Remove tracking parameters from URLs using ClearURLs rules
  * @website https://github.com/dededed6/BetterDiscordPlugins
  * @source https://raw.githubusercontent.com/dededed6/BetterDiscordPlugins/master/CleanUrls/CleanUrls.plugin.js
@@ -17,6 +17,7 @@ module.exports = class CleanUrls {
         this.clickListener = null;
         this.copyListener = null;
         this.contextMenuListener = null;
+        this.messageObserver = null;
     }
 
     async start() {
@@ -25,7 +26,11 @@ module.exports = class CleanUrls {
         await this.loadRules();
         if (this.rules) {
             if (cfg.cleanOutgoing) this.patchMessageSending();
-            if (cfg.cleanIncoming) this.patchIncomingMessages();
+            if (cfg.cleanIncoming) {
+                this.cleanExistingMessages();
+                this.observeNewMessages();
+                this.patchIncomingMessages();
+            }
             if (cfg.cleanLinks) this.patchLinkClicks();
             if (cfg.cleanCopy) this.patchCopyEvent();
         }
@@ -33,6 +38,10 @@ module.exports = class CleanUrls {
 
     stop() {
         this.abortController?.abort();
+        if (this.messageObserver) {
+            this.messageObserver.disconnect();
+            this.messageObserver = null;
+        }
         if (this.clickListener) {
             document.removeEventListener("click", this.clickListener, true);
             this.clickListener = null;
@@ -197,6 +206,52 @@ module.exports = class CleanUrls {
                     msg.content = msg.content.replace(/https?:\/\/[^\s]+/g, url => this.cleanUrl(url));
                 }
             });
+        }
+    }
+
+    // 새로운 메시지 감시
+    observeNewMessages() {
+        this.messageObserver = new MutationObserver((mutations) => {
+            mutations.forEach((mutation) => {
+                if (mutation.type === 'childList') {
+                    mutation.addedNodes.forEach((node) => {
+                        if (node.nodeType === Node.ELEMENT_NODE && node.getAttribute('role') === 'article') {
+                            this.cleanMessageContent(node);
+                        } else if (node.nodeType === Node.ELEMENT_NODE) {
+                            const messages = node.querySelectorAll('[role="article"]');
+                            messages.forEach(msg => this.cleanMessageContent(msg));
+                        }
+                    });
+                }
+            });
+        });
+
+        this.messageObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
+    // 기존 메시지 URL 정리
+    cleanExistingMessages() {
+        let containers = document.querySelectorAll('[role="article"]');
+
+        if (containers.length === 0) {
+            containers = document.querySelectorAll('[class*="message_"]');
+        }
+
+        if (containers.length === 0) {
+            containers = document.querySelectorAll('[class*="messageContent"]');
+        }
+
+        containers.forEach(container => {
+            this.cleanMessageContent(container);
+        });
+    }
+
+    cleanMessageContent(container) {
+        const original = container.innerHTML;
+        const cleaned = original.replace(/https?:\/\/[^\s<"']+/g, url => this.cleanUrl(url));
+
+        if (original !== cleaned) {
+            container.innerHTML = cleaned;
         }
     }
 
