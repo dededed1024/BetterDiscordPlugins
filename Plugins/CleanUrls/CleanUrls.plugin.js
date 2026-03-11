@@ -17,7 +17,6 @@ module.exports = class CleanUrls {
     }
 
     async start() {
-        BdApi.Logger.log(this.meta.name, "Plugin started");
         const cfg = this.settings.current;
         if (cfg.enabled) {
             this.abortController = new AbortController();
@@ -31,7 +30,6 @@ module.exports = class CleanUrls {
     }
 
     stop() {
-        BdApi.Logger.log(this.meta.name, "Plugin stopped");
         this.abortController?.abort();
         this.enabled = false;
         BdApi.Patcher.unpatchAll(this.meta.name);
@@ -54,7 +52,6 @@ module.exports = class CleanUrls {
         checkbox.addEventListener("change", () => {
             cfg.enabled = checkbox.checked;
             this.settings.save();
-            BdApi.Logger.info(this.meta.name, `Clean URLs: ${checkbox.checked}`);
         });
 
         toggleRow.appendChild(checkbox);
@@ -93,7 +90,6 @@ module.exports = class CleanUrls {
             }
         } catch (error) {
             if (error.name !== 'AbortError') {
-                BdApi.Logger.warn(this.meta.name, "Failed to load rules: " + error.message);
                 if (cached?.rules) this.rules = cached.rules;
             }
         }
@@ -116,7 +112,7 @@ module.exports = class CleanUrls {
             })
             .catch(e => {
                 if (e.name !== 'AbortError') {
-                    BdApi.Logger.warn(this.meta.name, "Background update failed");
+                    // 백그라운드 업데이트 실패
                 }
             });
     }

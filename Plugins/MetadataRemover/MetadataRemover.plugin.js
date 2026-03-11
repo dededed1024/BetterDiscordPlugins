@@ -11,21 +11,48 @@ module.exports = class MetadataRemover {
     constructor(meta) {
         this.meta = meta;
         this.settings = new SettingsManager(meta.name);
-        this.patcher = new NativePatcher();
     }
 
     start() {
-        BdApi.Logger.log(this.meta.name, "Plugin started");
-        const cfg = this.settings.current;
-        if (cfg.stripMetadata || cfg.randomizeFileName) {
-            this.patchFileOperations(cfg);
-        }
+        BdApi.Patcher.before(this.meta.name, BdApi.Webpack.getByKeys("_sendMessage"), "_sendMessage", this.handleFileUpload.bind(this));
     }
 
     stop() {
-        BdApi.Logger.log(this.meta.name, "Plugin stopped");
-        this.patcher.restoreAll();
         BdApi.Patcher.unpatchAll(this.meta.name);
+    }
+
+    async handleFileUpload(_, args) {
+        const cfg = this.settings.current;
+        if (!cfg.stripMetadata && !cfg.randomizeFileName) return;
+
+        const attachments = args[2]?.attachmentsToUpload;
+        if (!attachments?.length) return;
+
+        for (let i = 0; i < attachments.length; i++) {
+            let file = attachments[i];
+
+            if (cfg.stripMetadata) {
+                file = await MetadataStripper.strip(file);
+            }
+
+            if (cfg.randomizeFileName) {
+                const ext = file.name.substring(file.name.lastIndexOf('.') + 1) || '';
+                const newName = this.generateRandomName(ext);
+                const buffer = await file.arrayBuffer();
+                file = new File([buffer], newName, { type: file.type });
+            }
+
+            attachments[i] = file;
+        }
+    }
+
+    generateRandomName(ext) {
+        const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+        let name = '';
+        for (let i = 0; i < 10; i++) {
+            name += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return ext ? `${name}.${ext}` : name;
     }
 
     getSettingsPanel() {
@@ -50,7 +77,6 @@ module.exports = class MetadataRemover {
             checkbox.addEventListener("change", () => {
                 cfg[item.key] = checkbox.checked;
                 this.settings.save();
-                BdApi.Logger.info(this.meta.name, `${item.label}: ${checkbox.checked}`);
             });
 
             row.appendChild(checkbox);
@@ -59,48 +85,6 @@ module.exports = class MetadataRemover {
         });
 
         return container;
-    }
-
-    // fetch를 패치해서 FormData 파일들의 메타데이터 제거
-    patchFileOperations(cfg) {
-        const generateRandomName = (ext) => {
-            return `${Math.random().toString(36).substring(2, 10)}${ext ? '.' + ext : ''}`;
-        };
-
-        this.patcher.patchNative(window, "fetch", (orig) => async function (input, init = {}) {
-            // FormData만 처리 (파일 업로드)
-            if (init.body instanceof FormData) {
-                const formData = init.body;
-                const entries = await Promise.all(
-                    Array.from(formData).map(async ([key, value]) => {
-                        if (!(value instanceof File)) return [key, value];
-
-                        let processedFile = value;
-
-                        // 메타데이터 제거
-                        if (cfg.stripMetadata) {
-                            processedFile = await MetadataStripper.strip(processedFile);
-                        }
-
-                        // 파일명 무작위화
-                        if (cfg.randomizeFileName) {
-                            const ext = processedFile.name.substring(processedFile.name.lastIndexOf('.') + 1) || '';
-                            const newName = generateRandomName(ext);
-                            const buffer = await processedFile.arrayBuffer();
-                            processedFile = new File([buffer], newName, { type: processedFile.type });
-                        }
-
-                        return [key, processedFile];
-                    })
-                );
-
-                const newFormData = new FormData();
-                entries.forEach(([key, value]) => newFormData.append(key, value));
-                init.body = newFormData;
-            }
-
-            return orig.call(this, input, init);
-        });
     }
 };
 
@@ -120,45 +104,7 @@ class SettingsManager {
     }
 }
 
-// 네이티브 객체 패칭 관리
-class NativePatcher {
-    constructor() { this.restorers = []; }
-
-    patchNative(obj, prop, factory) {
-        if (!obj || !obj[prop]) return;
-        const orig = obj[prop];
-        const patched = factory(orig);
-
-        try {
-            Object.defineProperty(patched, "toString", { get: () => orig.toString.bind(orig) });
-        } catch (e) { }
-
-        try {
-            obj[prop] = patched;
-        } catch (e) {
-            try {
-                Object.defineProperty(obj, prop, { value: patched, configurable: true, writable: true });
-            } catch (e2) { return; }
-        }
-
-        this.restorers.push(() => {
-            try {
-                obj[prop] = orig;
-            } catch (e) {
-                try {
-                    Object.defineProperty(obj, prop, { value: orig, configurable: true, writable: true });
-                } catch (e2) { }
-            }
-        });
-    }
-
-    restoreAll() {
-        this.restorers.forEach(restore => { try { restore(); } catch (e) { } });
-        this.restorers = [];
-    }
-}
-
-// 메타데이터 제거 (Discognito에서 추출)
+// 메타데이터 제거
 class MetadataStripper {
     static HANDLERS = {
         'jpg': 'stripJpegExif', 'jpeg': 'stripJpegExif',
