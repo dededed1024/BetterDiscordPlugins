@@ -1,7 +1,7 @@
 /**
  * @name CleanURLs
  * @author dededed6
- * @version 1.4.2
+ * @version 1.4.3
  * @description Remove tracking parameters from URLs
  * @website https://github.com/dededed6/BetterDiscordPlugins
  * @source https://raw.githubusercontent.com/dededed6/BetterDiscordPlugins/master/CleanUrls/CleanUrls.plugin.js
@@ -17,7 +17,9 @@ module.exports = class CleanURLs {
     constructor() {
         this.compiledRules = null;
         this.messageObserver = null;
-        this.textOriginals = []; // 이거 안해도 다른 서버갔다오면 원래대로 복구되긴함
+        this._jumpToPresent = null; // 재로드 하는 방법 찾았음
+        this._channelStore = null; // 스크롤 위치를 기억할 수 없다는 단점이 아직 있긴함
+        // 투두? - 스크롤 위치 기억 기능 추가
     }
 
     // Rules
@@ -83,29 +85,19 @@ module.exports = class CleanURLs {
         const content = container.querySelector('[id^="message-content-"]');
         if (!content || !URL_PROTOCOL_PATTERN.test(content.textContent)) return;
 
-        if (this.textOriginals.length > 1000) { // 1000개까지만 보존해두기. 어차피 이 이상 저장되면 DOM에서 없어져있을듯 이미
-            this.textOriginals = this.textOriginals.filter(item => item.nodeRef.deref());
-        }
-
         const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, null); // walker말고 본문을 직접 지정하면 더 나을듯
         let node;
         while (node = walker.nextNode()) {
             const original = node.textContent;
             const cleaned = original.replace(URL_EXTRACTION_PATTERN, url => this.cleanUrl(url));
-            if (cleaned !== original) {
-                this.textOriginals.push({ nodeRef: new WeakRef(node), original });
-                node.textContent = cleaned;
-            }
+            if (cleaned !== original) node.textContent = cleaned;
         }
 
         for (const link of content.querySelectorAll("a[href]")) {
             const href = link.getAttribute("href");
             if (URL_PROTOCOL_PATTERN.test(href)) {
                 const cleaned = this.cleanUrl(href);
-                if (cleaned !== href) {
-                    link.dataset.cleanUrlOriginalHref = href;
-                    link.setAttribute("href", cleaned); // 이렇게해도 임베드까지 클린 가능
-                }
+                if (cleaned !== href) link.setAttribute("href", cleaned); // 이렇게해도 임베드까지 클린 가능
             }
         }
     }
@@ -138,6 +130,8 @@ module.exports = class CleanURLs {
     start() {
         this.updateRules();
         this.compiledRules = this.preprocessRules(Data.load("CleanURLs", "rules"));
+        this._jumpToPresent = Webpack.getModule((_, e) => e.id === 843472)?.A?.jumpToPresent;
+        this._channelStore = Webpack.getByKeys("getLastSelectedChannelId", "getChannelId");
 
         this.patchMessageSending();
         this.patchIncomingMessages();
@@ -145,22 +139,15 @@ module.exports = class CleanURLs {
 
     stop() {
         Patcher.unpatchAll("CleanURLs");
-        
+
         if (this.messageObserver) {
             this.messageObserver.disconnect();
             this.messageObserver = null;
         }
 
-        for (const { nodeRef, original } of this.textOriginals) {
-            const node = nodeRef.deref();
-            if (node) node.textContent = original;
-        }
-        this.textOriginals = [];
-
-        for (const link of document.querySelectorAll("a[data-clean-url-original-href]")) {
-            link.setAttribute("href", link.dataset.cleanUrlOriginalHref);
-            delete link.dataset.cleanUrlOriginalHref;
-        }
+        // Discord 내부 캐시(원본 URL)에서 재렌더링
+        const channelId = this._channelStore?.getChannelId?.();
+        if (channelId) this._jumpToPresent?.(channelId);
     }
 
 };
