@@ -4,6 +4,9 @@ A collection of privacy-focused BetterDiscord plugins.
 
 ## Plugins
 
+### [BlockLocally](Plugins/BlockLocally/)
+Block users locally.
+
 ### [BlockTrack](Plugins/BlockTrack/)
 Block Discord tracking and analytics events, including science events, Sentry error reports, telemetry, A/B experiments, typing indicators, read receipts, and activity status.
 
