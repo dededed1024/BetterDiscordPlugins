@@ -1,6 +1,6 @@
 # BetterDiscord Plugins
 
-A collection of privacy-focused BetterDiscord plugins.
+A collection of BetterDiscord plugins.
 
 ## Plugins
 
