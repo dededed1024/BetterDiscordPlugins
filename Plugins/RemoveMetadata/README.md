@@ -1,8 +1,8 @@
 # RemoveMetadata
 
-Strips metadata from files and pasted images before uploading to Discord. Supports 20 formats with optional file name randomization.
+Strips metadata from files and pasted images before uploading to Discord.
 
 ## Features
 
-- Supports JPEG, PNG, WebP, GIF, TIFF, BMP, ICO, SVG, MP3, WAV, OGG, FLAC, AAC, M4A, MOV, MP4, AVI, MKV, WebM, and PDF formats
-- File name randomization
+- Supporting formats: JPEG, PNG, WebP, GIF, TIFF, BMP, ICO, SVG, MP3, WAV, OGG, FLAC, AAC, M4A, MOV, MP4, AVI, MKV, WebM, and PDF
+- Optional file name randomization

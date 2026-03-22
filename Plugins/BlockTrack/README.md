@@ -1,16 +1,13 @@
 # BlockTrack
 
-Block Discord tracking and analytics events, including science events, Sentry error reports, telemetry, A/B experiments, typing indicators, read receipts, and activity status.
+Block Discord tracking.
 
 ## Features
 
-- Science/Analytics events blocking
+- Science/analytics events blocking
 - Sentry error reports blocking
-- Telemetry blocking
-- A/B experiments blocking
+- A/B experiment exposure blocking
 - Typing indicator blocking
 - Read receipts blocking
-- Activity status blocking
-- Game library and RPC monitoring blocking
-- Beacon API blocking (page unload tracking)
-- Periodic repatching (resolve dynamic loading issues)
+- Activity status and presence blocking
+- Game library and process detection blocking
