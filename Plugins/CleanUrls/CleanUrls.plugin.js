@@ -69,12 +69,19 @@ module.exports = class CleanURLs {
         document.querySelectorAll('[role="article"]').forEach(c => this.cleanMessageContent(c));
 
         const callback = mutations => {
-            mutations
-                .flatMap(m => m.target.closest?.('[class*="scrollerContent"]') ? Array.from(m.addedNodes) : [])
-                .flatMap(n => {
-                    const a = n.nodeType === Node.ELEMENT_NODE && n.querySelector('[role="article"]');
-                    return a ? [a] : [];
-                }).forEach(c => this.cleanMessageContent(c));
+            const seen = new Set();
+            for (const { addedNodes } of mutations) { // m.target.closest('[class*="scrollerContent"]')로 탐색 가지치기 하려 했는데 이러면 이미 캐시된 메시지가 패치되지않음 -> 원래 방식으로 돌아왔음
+                for (const node of addedNodes) {
+                    if (node.nodeType !== Node.ELEMENT_NODE) continue;
+                    const articles = node.matches('[role="article"]') ? [node] : node.querySelectorAll('[role="article"]');
+                    for (const article of articles) {
+                        if (!seen.has(article)) {
+                            seen.add(article);
+                            this.cleanMessageContent(article);
+                        }
+                    }
+                }
+            }
         };
 
         this.messageObserver = new MutationObserver(callback);
