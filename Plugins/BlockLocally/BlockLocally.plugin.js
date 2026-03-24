@@ -1,7 +1,7 @@
 /**
  * @name BlockLocally
  * @author dededed1024
- * @version 1.0.0
+ * @version 1.0.1
  * @description Block users locally
  * @website https://github.com/dededed1024/BetterDiscordPlugins
  * @source https://raw.githubusercontent.com/dededed1024/BetterDiscordPlugins/master/BlockLocally/BlockLocally.plugin.js
@@ -103,5 +103,6 @@ module.exports = class BlockLocally {
         Patcher.unpatchAll("BlockLocally");
         ContextMenu.unpatch("user-context", this._cmCallback);
         BdApi.DOM.removeStyle("BlockLocally-friends");
+        this.rerenderMessages();
     }
 };
