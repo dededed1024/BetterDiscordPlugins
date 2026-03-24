@@ -1,7 +1,7 @@
 /**
  * @name CleanURLs
  * @author dededed6
- * @version 1.4.3
+ * @version 1.4.4
  * @description Remove tracking parameters from URLs
  * @website https://github.com/dededed6/BetterDiscordPlugins
  * @source https://raw.githubusercontent.com/dededed6/BetterDiscordPlugins/master/CleanUrls/CleanUrls.plugin.js
@@ -85,7 +85,7 @@ module.exports = class CleanURLs {
         };
 
         this.messageObserver = new MutationObserver(callback);
-        this.messageObserver.observe(document.querySelector('[class*="content_"]'), { childList: true, subtree: true });
+        this.messageObserver.observe(document.body, { childList: true, subtree: true });
     }
 
     cleanMessageContent(container) {
