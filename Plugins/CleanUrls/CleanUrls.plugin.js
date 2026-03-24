@@ -3,8 +3,8 @@
  * @author dededed1024
  * @version 1.4.4
  * @description Remove tracking parameters from URLs
- * @website https://github.com/dededed6/BetterDiscordPlugins
- * @source https://raw.githubusercontent.com/dededed6/BetterDiscordPlugins/master/CleanUrls/CleanUrls.plugin.js
+ * @website https://github.com/dededed1024/BetterDiscordPlugins
+ * @source https://raw.githubusercontent.com/dededed1024/BetterDiscordPlugins/master/CleanUrls/CleanUrls.plugin.js
  */
 
 const { Data, Patcher, Webpack, Net } = BdApi;

@@ -3,8 +3,8 @@
  * @author dededed1024
  * @version 1.2.1
  * @description Block Discord tracking and analytics events
- * @website https://github.com/dededed6/BetterDiscordPlugins
- * @source https://raw.githubusercontent.com/dededed6/BetterDiscordPlugins/master/Plugins/BlockTrack/BlockTrack.plugin.js
+ * @website https://github.com/dededed1024/BetterDiscordPlugins
+ * @source https://raw.githubusercontent.com/dededed1024/BetterDiscordPlugins/master/Plugins/BlockTrack/BlockTrack.plugin.js
  */
 
 const { Data, Patcher, Webpack, UI } = BdApi;

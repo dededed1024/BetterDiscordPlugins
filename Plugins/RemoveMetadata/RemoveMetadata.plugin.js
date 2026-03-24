@@ -3,8 +3,8 @@
  * @author dededed1024
  * @version 1.3.1
  * @description Strips metadata from files and pasted images before uploading to Discord. Supports 20 formats with optional file name randomization.
- * @website https://github.com/dededed6/BetterDiscordPlugins
- * @source https://raw.githubusercontent.com/dededed6/BetterDiscordPlugins/master/Plugins/RemoveMetadata/RemoveMetadata.plugin.js
+ * @website https://github.com/dededed1024/BetterDiscordPlugins
+ * @source https://raw.githubusercontent.com/dededed1024/BetterDiscordPlugins/master/Plugins/RemoveMetadata/RemoveMetadata.plugin.js
  */
 
 const { Data, Patcher, Webpack } = BdApi;

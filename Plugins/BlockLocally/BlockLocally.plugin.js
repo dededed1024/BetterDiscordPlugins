@@ -3,8 +3,8 @@
  * @author dededed1024
  * @version 1.0.0
  * @description Block users locally
- * @website https://github.com/dededed6/BetterDiscordPlugins
- * @source https://raw.githubusercontent.com/dededed6/BetterDiscordPlugins/master/BlockLocally/BlockLocally.plugin.js
+ * @website https://github.com/dededed1024/BetterDiscordPlugins
+ * @source https://raw.githubusercontent.com/dededed1024/BetterDiscordPlugins/master/BlockLocally/BlockLocally.plugin.js
  */
 
 const { Data, Patcher, Webpack, ContextMenu } = BdApi;
