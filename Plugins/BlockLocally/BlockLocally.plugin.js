@@ -97,6 +97,7 @@ module.exports = class BlockLocally {
         this.patchStore(); // 실제 차단처리 로직
         this.patchContextMenu(); // 우클릭 패치
         this.updateFriendsCSS(); // 친구 목록에서 없애기
+        this.rerenderMessages();
     }
 
     stop() {
