@@ -43,7 +43,7 @@ module.exports = class MuteServer {
                 ContextMenu.buildItem({ type: "separator" }),
                 ContextMenu.buildItem({
                     type: "toggle",
-                    label: "Mute Server",
+                    label: "Mute Server Locally",
                     checked: isBlocked,
                     action: () => {
                         this.blocked[isBlocked ? "delete" : "add"](guildId);
