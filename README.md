@@ -16,8 +16,8 @@ Block Discord tracking and analytics events, including science events, Sentry er
 ### [CleanUrls](Plugins/CleanUrls/)
 Remove tracking parameters from URLs using ClearURLs rules.
 
-### [MuteServer](Plugins/MuteServer/)
-Locally hide notifications and message indicators from servers.
+### [MuteLocally](Plugins/MuteServer/)
+Locally mute notifications and message indicators from servers.
 
 ### [NoMirrorWebcam](Plugins/NoFlipWebcam/)
 Disables the mirror effect on webcam video.
